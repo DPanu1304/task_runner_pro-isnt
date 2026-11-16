@@ -37,6 +37,7 @@ void write_default(const std::string& path, const Config& c) {
     out << "{\n"
         << "  \"max_workers\": "    << c.max_workers    << ",\n"
         << "  \"max_queue_size\": " << c.max_queue_size << ",\n"
+        << "  \"max_timeout_sec\": " << c.max_timeout_sec << ",\n"
         << "  \"data_dir\": \""     << c.data_dir       << "\",\n"
         << "  \"log_file\": \""     << c.log_file       << "\",\n"
         << "  \"socket_path\": \""  << c.socket_path    << "\"\n"
@@ -61,12 +62,34 @@ Config load_config(const std::string& path) {
             c.max_workers     = to_int(extract_value(line), c.max_workers);
         else if (has_key(line, "max_queue_size"))
             c.max_queue_size  = to_int(extract_value(line), c.max_queue_size);
+        else if (has_key(line, "max_timeout_sec"))
+            c.max_timeout_sec = to_int(extract_value(line), c.max_timeout_sec);
         else if (has_key(line, "data_dir"))
             c.data_dir        = extract_value(line);
         else if (has_key(line, "log_file"))
             c.log_file        = extract_value(line);
         else if (has_key(line, "socket_path"))
             c.socket_path     = extract_value(line);
+        else if (has_key(line, "bind_ip"))
+            c.bind_ip         = extract_value(line);
+        else if (has_key(line, "port"))
+            c.port            = to_int(extract_value(line), c.port);
+        else if (has_key(line, "allowed_ips")) {
+            // La lista viene como: ["127.0.0.1", "192.168.1.0/24"]
+            c.allowed_ips.clear();
+            auto start = line.find('[');
+            auto end   = line.find(']');
+            if (start != std::string::npos && end != std::string::npos) {
+                std::string list = line.substr(start + 1, end - start - 1);
+                std::stringstream ss(list);
+                std::string item;
+                while (std::getline(ss, item, ',')) {
+                    item.erase(std::remove(item.begin(), item.end(), '"'), item.end());
+                    item.erase(std::remove_if(item.begin(), item.end(), ::isspace), item.end());
+                    if (!item.empty()) c.allowed_ips.push_back(item);
+                }
+            }
+        }
     }
     return c;
 }
