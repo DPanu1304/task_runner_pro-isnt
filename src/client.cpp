@@ -7,17 +7,33 @@
 #include <unistd.h>
 
 #include "ipc.h"
+#include "config.h"
 
 namespace {
 
 int one_shot(const std::string& request) {
-    const int fd = ipc::connect_unix(ipc::default_socket_path());
+    // Obtener host y puerto (variables de entorno o config)
+    const char* env_host = std::getenv("JOBRUNNER_HOST");
+    const char* env_port = std::getenv("JOBRUNNER_PORT");
+    
+    std::string host = env_host ? env_host : "127.0.0.1";
+    int port = env_port ? std::atoi(env_port) : 8080;
+
+    // Si no hay env, intentar leer config.json
+    if (!env_host || !env_port) {
+        Config cfg = load_config("config.json");
+        if (!env_host) host = cfg.bind_ip;
+        if (!env_port) port = cfg.port;
+    }
+
+    const int fd = ipc::connect_tcp(host, port);
     if (fd < 0) {
-        std::cerr << "error: no se pudo conectar al daemon. "
-                     "¿Está corriendo './server daemon'?\n";
+        std::cerr << "error: no se pudo conectar al daemon en "
+                  << host << ":" << port << "\n";
         return 3;
     }
     ipc::send_all(fd, request);
+    // Usamos recv_line porque el daemon responde una sola línea (o bloque)
     const std::string resp = ipc::recv_all(fd);
     ::close(fd);
     std::cout << resp;

@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include "config.h"
 #include "ipc.h"
@@ -202,6 +203,23 @@ std::string handle_request(JobRegistry& reg,
     return "ERR unknown verb\n";
 }
 
+void check_timeouts(JobRegistry& reg, int max_timeout_sec,
+                    const std::string& data_dir) {
+    if (max_timeout_sec <= 0) return;
+    const std::int64_t now = now_ns();
+    for (Job* j : reg.by_state(JobState::RUNNING)) {
+        if (j->started_at_ns <= 0) continue;
+        const std::int64_t elapsed_s =
+            (now - j->started_at_ns) / 1'000'000'000LL;
+        if (elapsed_s > max_timeout_sec) {
+            logger::warn(j->id, "timeout exceeded, killing");
+            job_runner::request_cancel(*j);
+            j->note = "timeout exceeded";
+            save_state(reg, data_dir);
+        }
+    }
+}
+
 } // namespace
 
 int run_daemon() {
@@ -209,13 +227,15 @@ int run_daemon() {
     logger::init(cfg.log_file);
     logger::info(-1, "daemon starting");
     std::fprintf(stderr,
-        "[daemon] config: max_workers=%d, max_queue_size=%d, socket=%s\n",
-        cfg.max_workers, cfg.max_queue_size, cfg.socket_path.c_str());
+        "[daemon] config: max_workers=%d, max_queue_size=%d, "
+        "max_timeout_sec=%d, socket=%s\n",
+        cfg.max_workers, cfg.max_queue_size, cfg.max_timeout_sec,
+        cfg.socket_path.c_str());
 
-    const int listen_fd = ipc::listen_unix(cfg.socket_path);
+    const int listen_fd = ipc::listen_tcp(cfg.bind_ip, cfg.port);
     if (listen_fd < 0) {
-        std::fprintf(stderr, "[daemon] no se pudo escuchar en %s: %s\n",
-                     cfg.socket_path.c_str(), std::strerror(errno));
+        std::fprintf(stderr, "[daemon] no se pudo escuchar en %s:%d: %s\n",
+                     cfg.bind_ip.c_str(), cfg.port, std::strerror(errno));
         return 2;
     }
     std::signal(SIGINT,  on_signal);
@@ -234,14 +254,15 @@ int run_daemon() {
         }
     }
 
-    std::fprintf(stderr, "[daemon] escuchando en %s (pid=%d)\n",
-                 cfg.socket_path.c_str(), (int)::getpid());
+    std::fprintf(stderr, "[daemon] escuchando en %s:%d (pid=%d)\n",
+                 cfg.bind_ip.c_str(), cfg.port, (int)::getpid());
 
     bool shutdown_flag = false;
 
     while (!g_stop && !shutdown_flag) {
         job_runner::reap_finished(reg);
         job_runner::escalate_cancels(reg);
+        check_timeouts(reg, cfg.max_timeout_sec, cfg.data_dir);
         save_state(reg, cfg.data_dir);
 
         while (reg.can_spawn()) {
@@ -256,9 +277,29 @@ int run_daemon() {
         const int rv = ::poll(&pfd, 1, 100);
         if (rv <= 0) continue;
 
-        const int cfd = ::accept(listen_fd, nullptr, nullptr);
+        struct sockaddr_in client_addr{};
+        socklen_t client_len = sizeof(client_addr);
+        const int cfd = ::accept(listen_fd, (struct sockaddr*)&client_addr, &client_len);
         if (cfd < 0) { if (errno == EINTR) continue; break; }
         ::fcntl(cfd, F_SETFD, FD_CLOEXEC);
+
+        // --- Whitelist (RF-20) ---
+        char client_ip[INET_ADDRSTRLEN] = {0};
+        ::inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+        std::string ip_str(client_ip);
+        
+        bool allowed = cfg.allowed_ips.empty(); // si está vacío, permite todo (para tests)
+        for (const auto& allowed_ip : cfg.allowed_ips) {
+            if (allowed_ip == ip_str) { allowed = true; break; }
+            // Aquí podríamos implementar CIDR (/24) en el futuro
+        }
+        
+        if (!allowed) {
+            std::fprintf(stderr, "[daemon] ACCESO DENEGADO desde %s\n", ip_str.c_str());
+            logger::warn(-1, "acceso denegado desde " + ip_str);
+            ::close(cfd);
+            continue;
+        }
 
         std::string req = ipc::recv_line(cfd);
         const std::string resp = handle_request(reg, req, shutdown_flag, cfg.data_dir);

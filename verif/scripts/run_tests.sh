@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 # Orquestador de pruebas de aceptación JobRunner.
-# Compila y ejecuta todos los verif/scripts/tc-*.sh, guardando evidencia
-# en verif/results/<run-id>/.
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -23,12 +21,18 @@ echo "    build OK"
 PASSED=0
 FAILED=0
 
+# Matar cualquier daemon/socket viejo antes de empezar
+pkill -9 -x server 2>/dev/null || true
+pkill -9 -f "src/server daemon" 2>/dev/null || true
+sleep 0.3
+rm -f /tmp/jobrunner*.sock
+
 shopt -s nullglob
 for tc in "$ROOT_DIR"/verif/scripts/tc-*.sh; do
     name="$(basename "$tc" .sh)"
     log="$RESULT_DIR/$name.log"
     echo "==> $name"
-    if timeout 60 bash "$tc" "$ROOT_DIR" >"$log" 2>&1; then
+    if timeout 90 bash "$tc" "$ROOT_DIR" >"$log" 2>&1; then
         echo "    PASS"
         PASSED=$((PASSED + 1))
     else

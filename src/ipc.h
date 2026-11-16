@@ -8,5 +8,9 @@ bool send_all(int fd, const std::string& data);
 std::string recv_all(int fd);       // hasta EOF (cliente -> daemon ha cerrado)
 std::string recv_line(int fd);      // hasta '\n' (petición de una línea)
 std::string default_socket_path();
+
+// Funciones nuevas para TCP (Hito 3)
+int listen_tcp(const std::string& ip, int port);
+int connect_tcp(const std::string& host, int port);
 }
 #endif
