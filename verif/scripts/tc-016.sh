@@ -4,12 +4,13 @@ set -uo pipefail
 
 ROOT_DIR="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 SERVER="$ROOT_DIR/src/server"
-SOCK="/tmp/jobrunner-test-$$.sock"
+PORT=$(( 20000 + RANDOM % 10000 ))
 DATA_DIR="$ROOT_DIR/data-test-$$"
 CONFIG="$ROOT_DIR/config.json"
 ORIG_CONFIG_BACKUP="$CONFIG.bak.$$"
 
-export JOBRUNNER_SOCKET="$SOCK"
+export JOBRUNNER_HOST="127.0.0.1"
+export JOBRUNNER_PORT="$PORT"
 [ -f "$CONFIG" ] && cp "$CONFIG" "$ORIG_CONFIG_BACKUP"
 cat > "$CONFIG" <<JSON
 {
@@ -18,7 +19,9 @@ cat > "$CONFIG" <<JSON
   "max_timeout_sec": 0,
   "data_dir": "$DATA_DIR",
   "log_file": "/tmp/jobrunner-test-$$.log",
-  "socket_path": "$SOCK"
+  "bind_ip": "127.0.0.1",
+  "port": $PORT,
+  "allowed_ips": ["127.0.0.1"]
 }
 JSON
 
@@ -30,8 +33,7 @@ cleanup() {
     for _i in $(seq 1 20); do ps -p "$DAEMON_PID" >/dev/null 2>&1 || break; sleep 0.1; done
     kill -9 "$DAEMON_PID" 2>/dev/null || true
     pkill -9 -x server 2>/dev/null || true
-    rm -f "$SOCK"
-    rm -rf "$DATA_DIR"
+        rm -rf "$DATA_DIR"
     rm -f "$CONFIG"
     [ -f "$ORIG_CONFIG_BACKUP" ] && mv "$ORIG_CONFIG_BACKUP" "$CONFIG"
 }
@@ -40,8 +42,7 @@ trap cleanup EXIT
 cd "$ROOT_DIR" || fail "no puedo entrar a ROOT_DIR"
 "$SERVER" daemon >/dev/null 2>&1 &
 DAEMON_PID=$!
-for _ in $(seq 1 50); do [ -S "$SOCK" ] && break; sleep 0.05; done
-[ -S "$SOCK" ] || fail "daemon no arrancó"
+sleep 0.5
 
 # ---------- Llenar el sistema: 1 RUNNING + 2 QUEUED ----------
 out=$("$SERVER" submit sleep 600)
