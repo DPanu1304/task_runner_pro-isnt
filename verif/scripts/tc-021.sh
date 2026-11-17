@@ -5,12 +5,13 @@ set -uo pipefail
 
 ROOT_DIR="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 SERVER="$ROOT_DIR/src/server"
-SOCK="/tmp/jobrunner-test-$$.sock"
+PORT=$(( 20000 + RANDOM % 10000 ))
 DATA_DIR="$ROOT_DIR/data-test-$$"
 CONFIG="$ROOT_DIR/config.json"
 ORIG_CONFIG_BACKUP="$CONFIG.bak.$$"
 
-export JOBRUNNER_SOCKET="$SOCK"
+export JOBRUNNER_HOST="127.0.0.1"
+export JOBRUNNER_PORT="$PORT"
 [ -f "$CONFIG" ] && cp "$CONFIG" "$ORIG_CONFIG_BACKUP"
 cat > "$CONFIG" <<JSON
 {
@@ -18,7 +19,9 @@ cat > "$CONFIG" <<JSON
   "max_queue_size": 10,
   "data_dir": "$DATA_DIR",
   "log_file": "/tmp/jobrunner-test-$$.log",
-  "socket_path": "$SOCK"
+  "bind_ip": "127.0.0.1",
+  "port": $PORT,
+  "allowed_ips": ["127.0.0.1"]
 }
 JSON
 
@@ -28,8 +31,7 @@ ok()   { echo "OK: $*"; }
 cleanup() {
     "$SERVER" shutdown >/dev/null 2>&1 || true
     pkill -9 -x server 2>/dev/null || true
-    rm -f "$SOCK"
-    rm -rf "$DATA_DIR"
+        rm -rf "$DATA_DIR"
     rm -f "$CONFIG"
     [ -f "$ORIG_CONFIG_BACKUP" ] && mv "$ORIG_CONFIG_BACKUP" "$CONFIG"
 }
@@ -38,8 +40,7 @@ trap cleanup EXIT
 cd "$ROOT_DIR" && "$SERVER" daemon >/dev/null 2>&1 &
 DAEMON_PID=$!
 DAEMON_PID=$!
-for _ in $(seq 1 50); do [ -S "$SOCK" ] && break; sleep 0.05; done
-[ -S "$SOCK" ] || fail "daemon no arrancó"
+sleep 0.5
 
 # Job que atrapa SIGTERM e ignora (para forzar el escalamiento a SIGKILL)
 "$SERVER" submit bash -c 'trap "echo caught" TERM; while true; do sleep 1; done' >/dev/null
