@@ -8,8 +8,7 @@
 
 Debe imprimir:
 
-    [daemon] config: max_workers=3, max_queue_size=100, socket=/tmp/jobrunner.sock
-    [daemon] escuchando en /tmp/jobrunner.sock (pid=XXXXX)
+    [daemon] escuchando en 127.0.0.1:8080 (pid=XXXXX)
 
 ### Terminal 2 — Enviar comandos
 
@@ -30,7 +29,7 @@ Debe imprimir:
 | Comando | Qué hace |
 |---|---|
 | `server help` | Muestra la ayuda |
-| `server daemon` | Arranca el servicio en foreground |
+| `server daemon` | Arranca el servicio |
 | `server submit <cmd> [args...]` | Envía un trabajo, devuelve ID |
 | `server status <id>` | Estado + stdout/stderr |
 | `server list [STATE]` | Lista o filtra por estado |
@@ -45,7 +44,20 @@ Debe imprimir:
 - **RUNNING** — En ejecución.
 - **SUCCEEDED** — Terminó con exit code 0.
 - **FAILED** — Exit code ≠ 0, señal o error interno.
-- **CANCELED** — Cancelado por el cliente.
+- **CANCELED** — Cancelado por el cliente o por timeout.
+
+## Operación remota
+
+Para conectar desde otra máquina en la misma LAN:
+
+    # En la máquina cliente
+    export JOBRUNNER_HOST=<IP_DEL_SERVIDOR>
+    export JOBRUNNER_PORT=8080
+
+    ./src/server submit echo "remoto"
+
+**Importante:** La IP del cliente debe estar en `allowed_ips` del
+`config.json` del servidor.
 
 ## Ejemplo completo — cola con límite
 
@@ -62,17 +74,16 @@ Debe imprimir:
 
 Si el daemon se cae (kill -9), al volver a arrancarlo los trabajos
 que estaban RUNNING aparecen como FAILED con
-`note=interrupted by restart`. Esto garantiza que no haya estados
-fantasma.
+`note=interrupted by restart`. No hay estados imposibles.
 
-## Configuración
+## Cambio de configuración
 
-Puedes cambiar los límites en `config.json`:
+Edita `config.json` antes de arrancar el daemon:
 
-    {
-      "max_workers": 3,
-      "max_queue_size": 100,
-      "data_dir": "./data",
-      "log_file": "jobrunner.log",
-      "socket_path": "/tmp/jobrunner.sock"
-    }
+- `max_workers`: trabajos concurrentes.
+- `max_queue_size`: capacidad de la cola.
+- `max_timeout_sec`: timeout automático (Watchdog).
+- `bind_ip` / `port`: dónde escucha el daemon.
+- `allowed_ips`: IPs autorizadas.
+
+Si el archivo no existe, se crea con valores por defecto.
